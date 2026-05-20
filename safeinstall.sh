@@ -200,13 +200,27 @@ _audit_blocked_scripts() {
 # Only audit after install/ci/add subcommands
 case "${1:-}" in
   install|i|ci|add|update|upgrade)
-    "$REAL" SAFEINSTALL_EXTRA_ARGS "$@"
+    "$REAL" "$1" SAFEINSTALL_EXTRA_ARGS "${@:2}"
     _EXIT=$?
     _audit_blocked_scripts "$(pwd)"
     exit $_EXIT
     ;;
+  "")
+    if [[ "SAFEINSTALL_NAME" == "pnpm" || "SAFEINSTALL_NAME" == "yarn" ]]; then
+      "$REAL" SAFEINSTALL_EXTRA_ARGS
+      _EXIT=$?
+      _audit_blocked_scripts "$(pwd)"
+      exit $_EXIT
+    else
+      exec "$REAL" "$@"
+    fi
+    ;;
   *)
-    exec "$REAL" SAFEINSTALL_EXTRA_ARGS "$@"
+    if [[ "SAFEINSTALL_NAME" == "npx" || "SAFEINSTALL_NAME" == "bunx" ]]; then
+      exec "$REAL" SAFEINSTALL_EXTRA_ARGS "$@"
+    else
+      exec "$REAL" "$@"
+    fi
     ;;
 esac
 WRAPPER_EOF
@@ -384,6 +398,35 @@ case "${1:-}" in
     ;;
   add|sync|run)
     _check_source_args "${@:2}"
+    if [[ "$1" == "run" ]]; then
+      has_pip=0
+      is_install=0
+      prev=""
+      for arg in "${@:2}"; do
+        if [[ $has_pip -eq 1 ]]; then
+          if [[ "$arg" == "install" || "$arg" == "download" ]]; then
+            is_install=1
+            break
+          fi
+        elif [[ "$arg" == "pip" || "$arg" == "pip3" ]]; then
+          if [[ "$prev" != "--package" && "$prev" != "-p" && "$prev" != "--with" ]]; then
+            has_pip=1
+          fi
+        fi
+        prev="$arg"
+      done
+      if [[ $has_pip -eq 1 && $is_install -eq 1 ]]; then
+        printf "\n\033[1;31msafeinstall: BLOCKED running pip install/download via uv run\033[0m\n\n" >&2
+        printf "Reason:\n" >&2
+        printf "  Running pip install/download via 'uv run' bypasses the safeinstall wrapper\n" >&2
+        printf "  and executes the raw pip binary without safety restrictions.\n\n" >&2
+        printf "Next steps:\n" >&2
+        printf "  Use 'uv pip install' or 'uv add' instead.\n" >&2
+        printf "  If you must run this exact command, use:\n" >&2
+        printf "    unsafe-uv run pip ...\n\n" >&2
+        exit 1
+      fi
+    fi
     exec "$REAL" "$1" --no-build "${@:2}"
     ;;
   tool)
