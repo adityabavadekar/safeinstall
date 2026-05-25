@@ -577,11 +577,17 @@ cmd_setup() {
   mkdir -p "$WRAP_DIR"
   ok_v "Directory ready"
 
-  # Copy script to local bin so it's globally available
-  if [[ -f "$0" && "$(basename "$0")" != "safeinstall" ]]; then
-    cp "$0" "$WRAP_DIR/safeinstall"
-    chmod +x "$WRAP_DIR/safeinstall"
-    ok_v "Installed 'safeinstall' command utility to $WRAP_DIR/safeinstall"
+  local dest_bin="$WRAP_DIR/safeinstall"
+  if [[ -f "$0" ]]; then
+    if [[ "$(basename "$0")" != "safeinstall" ]]; then
+      cp "$0" "$dest_bin"
+      chmod +x "$dest_bin"
+      ok_v "Installed 'safeinstall' command utility to $dest_bin"
+    fi
+  elif command -v curl >/dev/null; then
+    curl -fsSL https://raw.githubusercontent.com/adityabavadekar/safeinstall/master/safeinstall.sh -o "$dest_bin"
+    chmod +x "$dest_bin"
+    ok_v "Downloaded and installed 'safeinstall' utility to $dest_bin"
   fi
 
   log "Detecting and wrapping package managers..."
@@ -644,7 +650,7 @@ cmd_setup() {
 }
 
 cmd_remove() {
-  bold "  safeinstall - remove"
+  bold "  safeinstall - remove (taking down defenses)"
 
   log_v "Removing wrappers from $WRAP_DIR..."
   local removed=0
@@ -665,15 +671,26 @@ cmd_remove() {
     ok "Removed: $(local IFS=', '; echo "${removed_list[*]}")"
   fi
 
-
-  # remove safeinstall binary itself if present in WRAP_DIR
-  if [[ -f "$WRAP_DIR/safeinstall" ]]; then
-    rm "$WRAP_DIR/safeinstall"
-    ok "Removed safeinstall command utility"
-    ((removed++)) || true
-  fi
-
   [[ $removed -eq 0 ]] && warn "No managed wrappers found"
+  ok "Defenses removed. safeinstall utility remains available."
+}
+
+cmd_uninstall() {
+  bold "  safeinstall - uninstall"
+
+  log_v "Removing all wrappers, patches, and self..."
+  
+  for f in "$WRAP_DIR"/*; do
+    [[ -f "$f" ]] || continue
+    if is_intercepted "$f"; then
+      rm "$f"
+    fi
+  done
+
+  if [[ -f "$WRAP_DIR/safeinstall" ]]; then
+    rm -f "$WRAP_DIR/safeinstall"
+    ok "Removed safeinstall command utility"
+  fi
 
   log "Cleaning shell rc files..."
   local rcs
@@ -683,8 +700,7 @@ cmd_remove() {
   done
 
   printf "\n"
-  ok "safeinstall fully removed from system"
-  log "To install again, visit: https://github.com/adityabavadekar/safeinstall"
+  ok "safeinstall fully uninstalled from system"
 }
 
 cmd_status() {
@@ -720,7 +736,8 @@ cmd_help() {
 
   ${BOLD}Usage:${RST}
     setup            Install wrappers + patch shell rc files
-    remove           Remove all wrappers + shell patches
+    remove           Take down defenses (remove wrappers)
+    uninstall        Remove all wrappers, shell patches, and self
     status           Show interception status
     help             Show this help
     -v, --verbose    Show detailed logs
@@ -745,6 +762,7 @@ EOF
 case "${1:-help}" in
 setup) cmd_setup ;;
 remove) cmd_remove ;;
+uninstall) cmd_uninstall ;;
 status) cmd_status ;;
 help | --help | -h) cmd_help ;;
 *)
